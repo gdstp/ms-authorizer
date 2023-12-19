@@ -1,4 +1,4 @@
-service: ms-template
+service: ms-authorizer
 frameworkVersion: '3'
 
 provider:
@@ -9,8 +9,8 @@ provider:
   stage: ${opt:stage, "${env:stage, 'dev'}"}
   region: ${opt:region, "${env:region, 'us-east-1'}"}
   apiGateway:
-    restApiId: ${ssm:/backoffice/gateway/api-id}
-    restApiRootResourceId: ${ssm:/backoffice/gateway/root-resource-id}
+    restApiId: ${ssm:api-gateway-api-id}
+    restApiRootResourceId: ${ssm:api-gateway-root-resource-id}
 
 plugins:
   - serverless-webpack
@@ -23,10 +23,9 @@ custom:
     includeLayers: true
     number: 3
   funcDir: 'src/framework/functions'
-  basePath: 'backoffice/v1'
-  backoffice-authorizer: 
+  gateway-authorizer:
     type: token
-    authorizerId: ${ssm:/backoffice/gateway/authorizer-id}
+    authorizerId: ${ssm:api-gateway-authorizer-id}
   serverless-offline:
     httpPort: 4005
     lambdaPort: 3005
@@ -38,18 +37,58 @@ custom:
     packagerOptions:
       noFrozenLockfile: true
 
+resources:
+  Resources:
+    ApiGatewayRestApi:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: gateway
+    ApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: ApiGatewayAuthorizer
+        RestApiId: !GetAtt ApiGatewayRestApi.RestApiId
+        Type: 'TOKEN'
+        IdentitySource: 'method.request.header.Authorization'
+        AuthorizerUri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref AWS::Region
+            - ':lambda:path/2015-03-31/functions/'
+            - Fn::GetAtt: ['AuthorizerLambdaFunction', Arn]
+            - '/invocations'
+        AuthorizerResultTtlInSeconds: 300
+    AuthorizerPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Fn::GetAtt: ['AuthorizerLambdaFunction', Arn]
+        Action: lambda:InvokeFunction
+        Principal:
+          Fn::Join: ['', ['apigateway.', { Ref: 'AWS::URLSuffix' }]]
+    SSMRestApiGatewayApiId:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: api-gateway-api-id
+        Type: String
+        Value: !GetAtt ApiGatewayRestApi.RestApiId
+    SSMRestApiGatewayResourceId:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: api-gateway-root-resource-id
+        Type: String
+        Value: !GetAtt ApiGatewayRestApi.RootResourceId
+    SSMGatewayAuthorizerId:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: api-gateway-authorizer-id
+        Type: String
+        Value: !GetAtt ApiGatewayAuthorizer.AuthorizerId
+
+functions:
+  authorizer:
+    handler: ${self:custom.funcDir}/authorizer.handler
+
 package:
   patterns:
     - node_modules/**
-
-functions:
-  backofficeProxy:
-    handler: ${self:custom.funcDir}/backofficeProxy.handler
-    events:
-      - http:
-          path: ${self:custom.basePath}/template/{proxy+} 
-          method: any
-          authorizer: ${self:custom.backoffice-authorizer}
-          cors:
-            origin: '*'
-            headers: '*'
