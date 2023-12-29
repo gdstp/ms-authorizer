@@ -25,7 +25,7 @@ module.exports = {
         sourceType: 'module'
     },
     rules: {
-        'indent': ['error', 4],
+        'indent': ['error', 4, { ignoredNodes: ["PropertyDefinition"] }],
         '@typescript-eslint/no-unused-vars': 'error',
         '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
         'sort-imports': [
